@@ -1,0 +1,22 @@
+{
+  "name": "@peptidesdirect-io/partner-api-example",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "description": "Typed TypeScript client and runnable example for the PeptidesDirect Partner/Reseller Order API",
+  "license": "MIT",
+  "homepage": "https://peptidesdirect.io/partners",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "example": "tsx examples/create-order.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "tsx": "^4",
+    "@types/node": "^20"
+  }
+}
