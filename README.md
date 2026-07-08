@@ -16,7 +16,7 @@ Every request is authenticated with a per-partner API key, sent as:
 Authorization: Bearer pk_live_xxx
 ```
 
-Keys are issued per partner by PeptidesDirect. Read your key from an environment variable, for example `PARTNER_API_KEY`, and never commit it to source control.
+Keys are issued per partner by PeptidesDirect. To request a key, apply to the partner program at https://peptidesdirect.io/partners or email support@peptidesdirect.io. Once approved you receive a `pk_live_...` key (shown once). Read your key from an environment variable, for example `PARTNER_API_KEY`, and never commit it to source control.
 
 ## Quick start
 
