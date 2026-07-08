@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Partner program / API access
+    url: https://peptidesdirect.io/partners
+    about: Apply for a partner API key or ask questions about the live API.
+  - name: Security issue or exposed API key
+    url: mailto:security@peptidesdirect.io
+    about: Report a vulnerability or a leaked API key privately, do not open a public issue.

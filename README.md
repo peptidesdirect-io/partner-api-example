@@ -2,23 +2,17 @@
 
 A typed TypeScript client and a runnable end-to-end example for the PeptidesDirect Partner / Reseller Order API.
 
-## Install
+[![CI](https://github.com/peptidesdirect-io/partner-api-example/actions/workflows/ci.yml/badge.svg)](https://github.com/peptidesdirect-io/partner-api-example/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0_runtime-brightgreen)
+
+## Quick start
 
 ```bash
 npm install
+PARTNER_API_KEY=pk_live_xxx npm run example
 ```
-
-## Authentication
-
-Every request is authenticated with a per-partner API key, sent as:
-
-```
-Authorization: Bearer pk_live_xxx
-```
-
-Keys are issued per partner by PeptidesDirect. To request a key, apply to the partner program at https://peptidesdirect.io/partners or email support@peptidesdirect.io. Once approved you receive a `pk_live_...` key (shown once). Read your key from an environment variable, for example `PARTNER_API_KEY`, and never commit it to source control.
-
-## Quick start
 
 ```typescript
 import { PartnerApiClient } from "./src/client.js";
@@ -45,10 +39,64 @@ const order = await client.createOrder({
 console.log(order.orderNumber, order.amountDue, order.paymentInstructions);
 ```
 
+## Table of contents
+
+- [Install](#install)
+- [Authentication](#authentication)
+- [Quick start](#quick-start)
+- [Example output](#example-output)
+- [Endpoint reference](#endpoint-reference)
+- [Order status values](#order-status-values)
+- [Error codes](#error-codes)
+- [Idempotency](#idempotency)
+- [Rate limits](#rate-limits)
+- [No webhooks](#no-webhooks)
+- [Pricing](#pricing)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Links](#links)
+- [License](#license)
+
+## Install
+
+```bash
+npm install
+```
+
+## Authentication
+
+Every request is authenticated with a per-partner API key, sent as:
+
+```
+Authorization: Bearer pk_live_xxx
+```
+
+Keys are issued per partner by PeptidesDirect. To request a key, apply to the partner program at https://peptidesdirect.io/partners or email support@peptidesdirect.io. Once approved you receive a `pk_live_...` key (shown once). Read your key from an environment variable, for example `PARTNER_API_KEY`, and never commit it to source control.
+
 Run the full example (catalog, order, payment report, status poll) with:
 
 ```bash
 PARTNER_API_KEY=pk_live_xxx npm run example
+```
+
+## Example output
+
+Illustrative only, actual SKUs, amounts and order numbers depend on your catalog and account:
+
+```
+Fetching catalog...
+Catalog has 24 items, partner discount 25%
+Selected item: GLOW-5MG (Retatrutide 5mg, net EUR 74.25)
+Creating order...
+Order PD-2026-04213 created, status=pending
+Amount due: EUR 74.25
+Payment instructions: { sepa: { iban: 'DE...', reference: 'PD-2026-04213' } }
+Reporting SEPA payment...
+Payment report accepted, status=payment_reported
+Fetching order status...
+Order PD-2026-04213 status: payment_reported
+Tracking: not shipped yet
+Invoice URL: not available yet
 ```
 
 ## Endpoint reference
@@ -129,6 +177,14 @@ There are no webhooks. Poll `GET /orders/:id` for status changes and tracking up
 ## Pricing
 
 Partners never send prices. `netPrice` is always `retailPrice * (1 - discountPercent / 100)`, computed server-side from the catalog you fetched, so your quoted amounts always match what gets charged.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run and extend this example, and how to propose changes.
+
+## Security
+
+Never commit a real API key. See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Links
 
