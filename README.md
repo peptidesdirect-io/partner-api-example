@@ -103,6 +103,8 @@ Invoice URL: not available yet
 
 Base URL: `https://api.peptidesdirect.io/v1/partner`. All requests and responses are JSON, currency is always EUR.
 
+Interactive API docs (Swagger UI): https://api.peptidesdirect.io/v1/docs
+
 | Method | Path                     | Description                                              |
 | ------ | ------------------------ | ---------------------------------------------------------- |
 | GET    | `/catalog`               | List your SKUs, stock, retail price and your net price   |
