@@ -1,16 +1,35 @@
 import type {
+  CancelOrderResponse,
   CatalogResponse,
   CreateOrderResponse,
   CreatePartnerOrder,
   ListOrdersQuery,
   OrderDetails,
   OrderListResponse,
-  PartnerApiErrorBody,
+  PartnerApiErrorCode,
   ReportPayment,
   ReportPaymentResponse,
+  ShippingQuoteForCountry,
+  ShippingQuoteResponse,
+  ShippingQuoteTable,
 } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://api.peptidesdirect.io/v1/partner";
+
+/**
+ * An error body as seen by this client: either a contract code from the API,
+ * or one of two client-side fallback codes for the bodies that carry no `code`
+ * at all (RATE_LIMITED is a contract code the API also emits itself).
+ * A code-less 400 is a framework-level request-validation failure (a malformed
+ * body, an :id that is not a UUID) and becomes "VALIDATION_ERROR". A code-less
+ * 429 is the app-wide per-IP rate limit and becomes "RATE_LIMITED". Every other
+ * code-less status becomes "API_ERROR": the 404 that GET /orders/:id/invoice
+ * answers while no invoice exists yet, and any 5xx from the API.
+ */
+export interface PartnerApiErrorLike {
+  code: PartnerApiErrorCode | "VALIDATION_ERROR" | "API_ERROR";
+  message: string;
+}
 
 /**
  * Thrown for any non-2xx response. Carries the HTTP status plus the
@@ -18,9 +37,9 @@ const DEFAULT_BASE_URL = "https://api.peptidesdirect.io/v1/partner";
  */
 export class PartnerApiError extends Error {
   readonly status: number;
-  readonly code: PartnerApiErrorBody["code"];
+  readonly code: PartnerApiErrorLike["code"];
 
-  constructor(status: number, body: PartnerApiErrorBody) {
+  constructor(status: number, body: PartnerApiErrorLike) {
     super(`${body.code}: ${body.message} (HTTP ${status})`);
     this.name = "PartnerApiError";
     this.status = status;
@@ -33,6 +52,36 @@ export interface PartnerApiClientOptions {
   apiKey: string;
   /** Override for testing/staging. Defaults to the production base URL. */
   baseUrl?: string;
+}
+
+/**
+ * Coerce any error body into the { code, message } shape PartnerApiError expects.
+ * A body without a `code` comes from outside the partner module and is mapped by
+ * status: 400 is the framework's request validation, 429 is the app-wide per-IP
+ * rate limit (a rate limit like any other, reported as such), and anything else
+ * is reported as the generic "API_ERROR" rather than mislabelled.
+ */
+function toErrorBody(
+  status: number,
+  body: unknown,
+  fallbackMessage: string,
+): PartnerApiErrorLike {
+  const record = (body ?? {}) as Record<string, unknown>;
+  const code: PartnerApiErrorLike["code"] =
+    typeof record.code === "string"
+      ? (record.code as PartnerApiErrorCode)
+      : status === 400
+        ? "VALIDATION_ERROR"
+        : status === 429
+          ? "RATE_LIMITED"
+          : "API_ERROR";
+  const message =
+    typeof record.message === "string"
+      ? record.message
+      : Array.isArray(record.message)
+        ? record.message.join(", ")
+        : fallbackMessage;
+  return { code, message };
 }
 
 /**
@@ -51,9 +100,23 @@ export class PartnerApiClient {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   }
 
-  /** GET /catalog - your product list with SKUs, stock and your net prices. */
+  /** GET /catalog - your product list with SKUs, stock, net prices and lab reports. */
   async getCatalog(): Promise<CatalogResponse> {
     return this.request<CatalogResponse>("GET", "/catalog");
+  }
+
+  /** GET /shipping/quote - the full flat-rate table (zones plus blocked countries). */
+  async getShippingQuote(): Promise<ShippingQuoteTable>;
+  /** GET /shipping/quote?country=XX - rate and shippability for one destination. */
+  async getShippingQuote(country: string): Promise<ShippingQuoteForCountry>;
+  async getShippingQuote(country?: string): Promise<ShippingQuoteResponse> {
+    if (country !== undefined && country.trim() === "") {
+      throw new Error(
+        'getShippingQuote() got a blank country string. Pass a country code such as "DE", or call getShippingQuote() with no argument for the full table.',
+      );
+    }
+    const qs = country ? `?country=${encodeURIComponent(country)}` : "";
+    return this.request<ShippingQuoteResponse>("GET", `/shipping/quote${qs}`);
   }
 
   /** POST /orders - create a new order. Use partnerOrderRef as an idempotency key. */
@@ -67,6 +130,19 @@ export class PartnerApiClient {
       "POST",
       `/orders/${encodeURIComponent(orderId)}/payment`,
       body,
+    );
+  }
+
+  /**
+   * POST /orders/:id/cancel - cancel an order and release its reserved stock.
+   * Only possible while the order is still pending with no reported payment;
+   * anything later throws ORDER_NOT_CANCELLABLE (HTTP 409). Idempotent:
+   * cancelling an already cancelled order succeeds.
+   */
+  async cancelOrder(orderId: string): Promise<CancelOrderResponse> {
+    return this.request<CancelOrderResponse>(
+      "POST",
+      `/orders/${encodeURIComponent(orderId)}/cancel`,
     );
   }
 
@@ -101,10 +177,10 @@ export class PartnerApiClient {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     });
     if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as PartnerApiErrorBody | null;
+      const body = (await res.json().catch(() => null)) as unknown;
       throw new PartnerApiError(
         res.status,
-        body ?? { code: "ORDER_NOT_FOUND", message: "Failed to download invoice" },
+        toErrorBody(res.status, body, "Failed to download invoice"),
       );
     }
     return res.arrayBuffer();
@@ -120,10 +196,13 @@ export class PartnerApiClient {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
-    const json = (await res.json()) as unknown;
+    const json = (await res.json().catch(() => null)) as unknown;
 
     if (!res.ok) {
-      throw new PartnerApiError(res.status, json as PartnerApiErrorBody);
+      throw new PartnerApiError(
+        res.status,
+        toErrorBody(res.status, json, `Request failed (HTTP ${res.status})`),
+      );
     }
 
     return json as T;

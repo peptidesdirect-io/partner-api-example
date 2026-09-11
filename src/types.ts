@@ -2,10 +2,17 @@
  * Types for the PeptidesDirect Partner / Reseller Order API.
  *
  * Base URL: https://api.peptidesdirect.io/v1/partner
- * All responses are JSON. Currency is always EUR.
+ * All responses are JSON except GET /orders/:id/invoice, which streams a PDF.
+ * Currency is always EUR.
+ *
+ * Interactive reference (OpenAPI): https://api.peptidesdirect.io/v1/docs
  */
 
-/** A shipping/billing address. Country must be an ISO-2 code (e.g. "DE"). */
+/**
+ * A shipping/billing address. For `country`, an ISO-2 code (e.g. "DE") is
+ * preferred; ISO-3 codes and the aliases "UK" and "EL" are also accepted and
+ * are canonicalised server-side.
+ */
 export interface Address {
   firstName: string;
   lastName: string;
@@ -14,9 +21,32 @@ export interface Address {
   city: string;
   state?: string;
   postalCode: string;
-  /** ISO-2 country code, e.g. "DE", "FR", "AT". */
+  /**
+   * ISO country code, e.g. "DE", "FR", "GB". ISO-3 codes and the aliases
+   * "UK" and "EL" are canonicalised server-side ("UK" -> "GB", "EL" -> "GR").
+   */
   country: string;
   phone?: string;
+}
+
+/**
+ * One certificate of analysis (CoA / lab report) as exposed on the partner API.
+ * Returned as a list on catalog items and as the single latest report on order
+ * detail lines.
+ */
+export interface PartnerCoa {
+  batchNumber: string;
+  /** ISO date, "YYYY-MM-DD". */
+  testDate: string | null;
+  labName: string;
+  /** Purity in percent, e.g. 99.2. Null for CoAs that report content instead. */
+  purity: number | null;
+  /** Link to the CoA document, if published. */
+  reportUrl: string | null;
+  /** One-click lab verification link (e.g. Janoshik), if the lab exposes one. */
+  verificationUrl: string | null;
+  /** Public verify page the vial QR code resolves to, if the batch has a code. */
+  publicUrl: string | null;
 }
 
 /** One product line as returned by GET /catalog. */
@@ -31,6 +61,8 @@ export interface CatalogItem {
   netPrice: number;
   stock: number;
   inStock: boolean;
+  /** All certificates of analysis on file for this product, newest test first. */
+  labReports: PartnerCoa[];
 }
 
 /** Response body of GET /catalog. */
@@ -40,6 +72,47 @@ export interface CatalogResponse {
   discountPercent: number;
   items: CatalogItem[];
 }
+
+/** Shipping zones a destination can fall into. */
+export type ShippingZone = "de" | "eu" | "nonEu";
+
+/** One zone row of the full shipping-rate table. */
+export interface ShippingZoneRate {
+  zone: ShippingZone;
+  /** Flat rate in EUR, charged per order and never discounted. */
+  rate: number;
+  /**
+   * ISO-2 codes in this zone, or null for the nonEu zone, which means
+   * "every country not listed in another zone".
+   */
+  countries: string[] | null;
+}
+
+/** Response of GET /shipping/quote without a country: the whole rate table. */
+export interface ShippingQuoteTable {
+  currency: "EUR";
+  /** Always null: partner shipping has no free-shipping threshold. */
+  freeShippingThreshold: null;
+  /** ISO-2 codes we currently do not ship to at all. */
+  blockedCountries: string[];
+  zones: ShippingZoneRate[];
+}
+
+/** Response of GET /shipping/quote?country=XX: the rate for one destination. */
+export interface ShippingQuoteForCountry {
+  currency: "EUR";
+  /** The canonicalised ISO-2 code the quote was resolved for. */
+  country: string;
+  zone: ShippingZone;
+  shippable: boolean;
+  /** Flat rate in EUR, or null when the destination is not shippable. */
+  rate: number | null;
+  /** Always null: partner shipping has no free-shipping threshold. */
+  freeShippingThreshold: null;
+}
+
+/** Either shape GET /shipping/quote can return. */
+export type ShippingQuoteResponse = ShippingQuoteTable | ShippingQuoteForCountry;
 
 /** One line item in a new order. Prices are never sent by the partner. */
 export interface OrderItemInput {
@@ -58,6 +131,7 @@ export interface CreatePartnerOrder {
   partnerOrderRef?: string;
   items: OrderItemInput[];
   shipTo: Address;
+  /** Stored for the customs declaration only, never emailed (white-label). */
   endCustomerEmail?: string;
 }
 
@@ -65,6 +139,7 @@ export interface CreatePartnerOrder {
 export interface SepaPaymentInstructions {
   iban: string;
   accountHolder: string;
+  /** Use the order number as the transfer reference. */
   reference: string;
 }
 
@@ -73,13 +148,18 @@ export interface CryptoPaymentInstructions {
   coin: string;
   network: string;
   address: string;
-  amount: string;
+  /** Amount in EUR (same value as amountDue). */
+  amount: number;
 }
 
-/** Payment options returned alongside a newly created order. */
+/**
+ * Payment options returned alongside a newly created order. Both rails are
+ * always present; individual fields can be empty strings when a rail is not
+ * configured, so check `iban` / `address` before using them.
+ */
 export interface PaymentInstructions {
-  sepa?: SepaPaymentInstructions;
-  crypto?: CryptoPaymentInstructions;
+  sepa: SepaPaymentInstructions;
+  crypto: CryptoPaymentInstructions;
 }
 
 /** All possible order lifecycle states. */
@@ -96,9 +176,14 @@ export type OrderStatus =
 export interface CreateOrderResponse {
   orderId: string;
   orderNumber: string;
-  partnerOrderRef?: string;
+  partnerOrderRef: string | null;
   status: OrderStatus;
   currency: "EUR";
+  /** Net product total in EUR (your discount already applied). */
+  subtotal: number;
+  /** Flat shipping rate in EUR, charged in full and never discounted. */
+  shippingCost: number;
+  /** subtotal + shippingCost, the amount to transfer. */
   amountDue: number;
   paymentInstructions: PaymentInstructions;
 }
@@ -106,9 +191,9 @@ export interface CreateOrderResponse {
 /** Request body of POST /orders/:id/payment. */
 export interface ReportPayment {
   method: "sepa" | "crypto";
-  /** Required for crypto payments: the on-chain transaction hash. */
+  /** For crypto payments: the on-chain transaction hash. */
   txHash?: string;
-  /** Required for SEPA payments: the transfer reference used. */
+  /** For SEPA payments: the transfer reference used. */
   reference?: string;
 }
 
@@ -118,11 +203,19 @@ export interface ReportPaymentResponse {
   status: "payment_reported" | "already_confirmed" | "order_cancelled";
 }
 
+/** Response body of POST /orders/:id/cancel. */
+export interface CancelOrderResponse {
+  orderId: string;
+  status: "cancelled";
+}
+
 /** One line item as returned inside order details. */
 export interface OrderDetailsItem {
   sku: string;
   qty: number;
   netPrice: number;
+  /** Latest certificate of analysis = the batch currently shipping, if any. */
+  coa: PartnerCoa | null;
 }
 
 /** Shipment tracking info, if the order has shipped. */
@@ -135,13 +228,28 @@ export interface OrderTracking {
 export interface OrderDetails {
   orderId: string;
   orderNumber: string;
-  partnerOrderRef?: string;
+  partnerOrderRef: string | null;
   status: OrderStatus;
   currency: "EUR";
+  subtotal: number;
+  shippingCost: number;
   amountDue: number;
   items: OrderDetailsItem[];
   tracking: OrderTracking | null;
   invoiceUrl: string | null;
+}
+
+/** One row of GET /orders. Lighter than OrderDetails: no items or tracking. */
+export interface OrderSummary {
+  orderId: string;
+  orderNumber: string;
+  partnerOrderRef: string | null;
+  status: OrderStatus;
+  subtotal: number;
+  shippingCost: number;
+  amountDue: number;
+  /** ISO 8601 timestamp. */
+  createdAt: string;
 }
 
 /** Query parameters for GET /orders. */
@@ -153,12 +261,12 @@ export interface ListOrdersQuery {
   offset?: number;
 }
 
-/** Response body of GET /orders. */
+/** Response body of GET /orders. Newest order first. */
 export interface OrderListResponse {
   total: number;
   limit: number;
   offset: number;
-  orders: OrderDetails[];
+  orders: OrderSummary[];
 }
 
 /** Error codes the API can return in a PartnerApiError body. */
@@ -170,7 +278,9 @@ export type PartnerApiErrorCode =
   | "COUNTRY_NOT_SHIPPABLE"
   | "CANARY_NOT_SHIPPABLE"
   | "PRODUCT_NOT_SHIPPABLE_TO_COUNTRY"
+  | "GB_MIN_ORDER_VALUE"
   | "ORDER_NOT_FOUND"
+  | "ORDER_NOT_CANCELLABLE"
   | "RATE_LIMITED";
 
 /** Shape of a non-2xx JSON error body. */

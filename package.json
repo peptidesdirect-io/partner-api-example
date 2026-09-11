@@ -1,6 +1,6 @@
 {
   "name": "@peptidesdirect-io/partner-api-example",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "type": "module",
   "description": "Typed TypeScript client and runnable example for the PeptidesDirect Partner/Reseller Order API",
